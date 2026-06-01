@@ -1,5 +1,8 @@
 # PodMaker docs
 
-Customer-facing documentation for vault-bridge agent, installer
-scripts, runbooks. Synced periodically from the monorepo by
-`.github/workflows/publish-docs.yml`.
+Customer-facing documentation for vault-bridge-agent
+installers, runbooks, and release procedures.
+
+Synced from podmaker-sh/podmaker on a daily cron + every
+merge to main. Pull requests filed here are forwarded to
+the monorepo by the maintainers.
