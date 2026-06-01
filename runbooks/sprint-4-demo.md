@@ -10,7 +10,7 @@ cold start.
   OpenBao + Temporal + step-ca + NATS).
 - Working hcloud account + an `HCLOUD_TOKEN` with Read+Write scope.
 - Working Cloudflare account + an API token with Zone.DNS read+write.
-- A registered DNS apex (e.g. `demo.podmaker.io`) pointing its
+- A registered DNS apex (e.g. `demo.podmaker.sh`) pointing its
   nameservers at Cloudflare.
 
 ## Phase 1 — Bring up the stack
@@ -95,7 +95,7 @@ Expected workflow steps stream (in order):
 Acceptance check:
 
 ```sh
-curl -I https://hello.demo.podmaker.io
+curl -I https://hello.demo.podmaker.sh
 # HTTP/2 200, valid TLS cert chain
 ```
 
@@ -121,7 +121,7 @@ Audit events:
 
 - [ ] First deploy < 6 minutes wall-clock.
 - [ ] Second `pdctl up` of an unchanged manifest < 90 seconds.
-- [ ] `curl https://hello.demo.podmaker.io` returns 200 with valid TLS.
+- [ ] `curl https://hello.demo.podmaker.sh` returns 200 with valid TLS.
 - [ ] AuditLog tab shows every step listed above with no `outcome=failure`.
 - [ ] Demo Friday video recorded and stored under `docs/demo/recordings/`.
 

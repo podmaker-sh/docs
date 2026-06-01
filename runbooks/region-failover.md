@@ -22,14 +22,14 @@
 
 ```bash
 # 1. Confirm which region is down
-curl -s https://control-plane.podmaker.io/api/internal/regions/health \
+curl -s https://control-plane.podmaker.sh/api/internal/regions/health \
   -H "Authorization: Bearer $INTERNAL_TOKEN" | jq .
 
 # 2. Check NATS hub connectivity
-nats --server nats://hub.podmaker.io:4222 server report jetstream
+nats --server nats://hub.podmaker.sh:4222 server report jetstream
 
 # 3. Check Vault cluster
-bao status --address https://vault.podmaker.io:8200
+bao status --address https://vault.podmaker.sh:8200
 
 # 4. Check regional DB
 psql "$REGIONAL_DSN" -c "SELECT 1" 2>&1
@@ -43,14 +43,14 @@ psql "$REGIONAL_DSN" -c "SELECT 1" 2>&1
 
 ```bash
 # Step 1 — verify standby is healthy and caught up
-bao status --address https://vault-standby.podmaker.io:8200
+bao status --address https://vault-standby.podmaker.sh:8200
 # Expect: Initialized=true, Sealed=false, HA Enabled=true
 
 # Step 2 — step down primary (if reachable; otherwise skip to Step 3)
-bao operator step-down --address https://vault.podmaker.io:8200
+bao operator step-down --address https://vault.podmaker.sh:8200
 
 # Step 3 — confirm new leader
-bao status --address https://vault-standby.podmaker.io:8200 | grep "HA Mode"
+bao status --address https://vault-standby.podmaker.sh:8200 | grep "HA Mode"
 # Expect: HA Mode: active
 
 # Step 4 — update vault-broker env (VAULT_ADDR) in control-plane .env
@@ -69,14 +69,14 @@ NATS leaf nodes reconnect automatically to the hub. No manual action needed unle
 
 ```bash
 # Verify hub is healthy
-nats --server nats://hub.podmaker.io:4222 server info
+nats --server nats://hub.podmaker.sh:4222 server info
 
 # If hub is down — promote secondary hub (if configured):
 # Update leaf.conf `url` in affected edge nodes and reload NATS
 nats-server --signal reload
 
 # Drain inflight messages from down leaf (replay from FileStorage)
-nats --server nats://hub.podmaker.io:4222 stream get HM-AGENTS-us-east --last
+nats --server nats://hub.podmaker.sh:4222 stream get HM-AGENTS-us-east --last
 ```
 
 ---
