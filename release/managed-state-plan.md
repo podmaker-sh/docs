@@ -840,4 +840,162 @@ Deliverables:
   home.
 - `apps/control-plane/config/self_deploy.php` — canary / cooldown /
   budget defaults.
+
+---
+
+## 16. Closeout — Hardening pass (2026-06-02)
+
+After the initial tier ladder shipped, an end-to-end coverage audit
+surfaced four blind spots in the diff engine, one missing action
+registration, multiple missing tier YAMLs, and one runtime gap. All
+four are closed in this pass; the runtime gap stays open as the next
+sprint's headline (`§17`).
+
+### 16.1 Attribute-blind diff (fixed)
+
+`diffStore` only emitted steps when `Kind` changed. T2→T3 same-cloud
+promotes (RDS instance class bump, ElastiCache cluster mode flip,
+EBS storage grow, multi-AZ toggle, backup retention bump) compiled to
+0 state steps — the promotion looked like "scale only" and skipped
+the cutover wrap.
+
+Fix: `diffStoreAttributes` (Postgres / Redis / Secrets / Registry /
+each store) and `diffComputeAttributes` emit per-field steps. New
+action kinds (registered as stateless stubs with realistic wallclock +
+downtime so projections are honest):
+
+| Step kind | Source |
+|---|---|
+| `ResizeStoreInstance` | RDS / Cloud SQL instance class change |
+| `ResizeStoreNode` | ElastiCache / Memorystore node type |
+| `ResizeStoreStorage` | RDS / Cloud SQL storage GiB |
+| `ResizeContainerVolume` | Host docker-compose volume |
+| `ToggleStoreMultiAz` | RDS Multi-AZ on/off |
+| `ToggleStoreClusterMode` | ElastiCache cluster mode flip |
+| `BumpStoreBackupRetention` | RDS / Cloud SQL retention bump |
+| `ResizeStoreManaged` | DO Managed DB / Redis size swap |
+| `BumpStoreTier` | DOCR / Cloud SQL tier swap (basic→pro) |
+| `ResizeComputeInstance` | EC2 / GCE / droplet size bump |
+| `ResizeComputeDisk` | EBS / PD / Cloud Volume online grow |
+| `ToggleComputeMultiAz` | ASG AZ list change |
+| `ResizeComputePool` | desired / min / max retag |
+
+These do NOT carry a Migrate prefix, so `wrapCutover` correctly leaves
+them online — the operator sees an attribute change as a non-disruptive
+plan.
+
+### 16.2 Region / Provider drift (fixed)
+
+`Diff` now emits a `MigrateRegion` step whenever `Compute.Provider` or
+`Compute.Region` differ between source and target, threading
+source/target provider+region into the action Params. Per-store
+region drift (`StoreSpec.Region` / `StoreSpec.PrimaryRegion`) triggers
+the full Provision+Migrate+Wait ladder for that store, even when the
+kind stayed the same.
+
+### 16.3 `ProvisionContainer` registration (fixed)
+
+`pascalCase("Provision", "container") == "ProvisionContainer"` was the
+action lookup the diff engine emitted for a downgrade
+(T2→T1, *→container). It wasn't registered → the workflow walker
+panicked at the registry lookup. Registered with a 30 s wallclock /
+$0 cost-month delta — the real cost saving comes from the
+managed-bill teardown that the matching `Decommission` step queues.
+
+### 16.4 Tier YAML coverage (filled)
+
+| Added | Note |
+|---|---|
+| `tiers/t2-managed-hetzner.yaml` | Hetzner has no managed state — this is an honest "bigger CCX + Hetzner LB" tier. |
+| `tiers/t3-multi-host-hetzner.yaml` | Horizontal scale on Hetzner — 3 CCX nodes behind a Hetzner LB. |
+| `tiers/t3-k8s-aws.yaml` | EKS variant of T3; reuses `infra/terraform/aws/t3/` for managed state. |
+| `tiers/t3-k8s-gcp.yaml` | GKE variant. |
+| `tiers/t3-k8s-do.yaml` | DOKS variant. |
+| `tiers/t4-mesh-aws.yaml` | Aurora Global + ElastiCache Global + VPC peering across 2 regions. |
+| `tiers/t4-mesh-gcp.yaml` | Cloud SQL HA + Memorystore + Artifact Registry cross-region. |
+| `tiers/t4-mesh-multi-cloud.yaml` | AWS + GCP active/active with the state pinned to AWS. |
+| Edge `do-lb`, `hetzner-lb` | Added to schema + cost estimator; T2/T3 DO tiers swapped from `caddy-direct`. |
+| State `do-managed-registry` | DigitalOcean Container Registry. `infra/terraform/do/t2/registry.tf` + `ProvisionDoManagedRegistry` action. |
+
+### 16.5 Pre-flight validation in the CP (added)
+
+`/v1/self-deploy/preflight` is a new orchestrator endpoint that takes
+the same payload as `/promote` but only runs the diff + checks every
+plan step Kind is registered + checks the cost delta against the
+budget cap. Returns `200 OK` with the resolved counts or
+`422 Unprocessable Entity` with `missing_kinds` / `reason`.
+
+`TierPromoteController::promote` calls preflight first; a 422
+short-circuits the dispatch and writes the `rejected_preflight`
+status to the `TierPromotionRun` row so the operator sees why on the
+Filament dashboard. The same check runs server-side on `/promote` as
+a backstop in case the CP skips preflight.
+
+### 16.6 Test coverage delta
+
+`packages/shared-go/pkg/tier/diff_test.go` gained:
+- `TestDiff_ComputeRegionChange_EmitsMigrateRegion`
+- `TestDiff_ComputeProviderChange_EmitsMigrateRegion`
+- `TestDiff_StoreRegionChange_TriggersMigration`
+- `TestDiff_StoreAttributeChanges_EmitResizeSteps`
+- `TestDiff_ComputeAttributeChanges_EmitResizeSteps`
+
+`apps/orchestrator/internal/api/server_test.go` (new):
+- `TestPreflight_OK`
+- `TestPreflight_MissingKind`
+- `TestPreflight_BadJSON`
+
+### 16.7 Cost estimator provider-awareness (fixed)
+
+`Estimate` was AWS-only for `compute.kind: k8s` and `compute.kind: mesh`
+— GKE / DOKS / multi-cloud tiers reported nonsense (e.g. an "EKS
+control plane" line on a `t3-k8s-do.yaml`). Fixed: `k8s` branches on
+`provider` (eks/gke/doks) and `mesh` branches per `regions[*].provider`.
+`hcloud-single` with `desired > 1` now reports `Hetzner pool` instead
+of a single-node SKU.
+
+---
+
+## 17. Open after closeout (next sprint)
+
+### 17.1 Terraform runner (P3a)
+
+`provision_aws.go` actions all log-only Apply (`slog.Info`). A concrete
+runner — shell out to `terraform apply -auto-approve` with the module
+path resolved from `action.Kind` (e.g. `ProvisionAwsRds` → `infra/
+terraform/aws/t2/rds.tf` as part of the T2 module) and `-var` flags
+from `action.Params` — turns the entire diff into a real provisioning
+workflow. Reuse the `execRunner` seam in `actions/exec_runner.go` so
+tests stay sealed.
+
+### 17.2 Concrete cutover actions (P3b)
+
+`SwapTraffic`, `RestartStatelessFleet`, `RefreshSecretsAtCutover`,
+`SmokeTest` (partly done), `Decommission`, `MigrateRegion`,
+`MigrateTemporal`/`Nats`/`StepCa`/`Openbao`, every Resize* / Toggle* /
+Bump* — currently emit + project but don't move bytes. P3b lands the
+cloud-API calls per action. Each takes ≤ 1 file.
+
+### 17.3 Kubernetes executor (P3c)
+
+`tiers/t3-k8s-*.yaml` need an `ApplyTierPlan` branch that drives
+`helm upgrade --install podmaker deploy/helm/podmaker-platform`
+instead of the docker-compose / cloud-init flow. The orchestrator
+already has the Helm chart wired (Sprint 4.6 scaffold); P3c finishes
+the wiring.
+
+### 17.4 Aurora Global migration shape (P3d)
+
+`MigratePostgres`'s pglogical implementation can't seed an Aurora
+Global secondary — Global Datastore replication is built-in and uses
+its own bootstrap (`source_region`). Detect the destination kind in
+`MigratePostgres` Apply and route to either pglogical or native Aurora
+Global seeding.
+
+### 17.5 Multi-cloud state seeding (P4)
+
+`tiers/t4-mesh-multi-cloud.yaml` ships with the GCP leg reading off
+the Aurora Global secondary — the cross-cloud transit is a research
+problem the manifest defers. Track separately under the multi-region
+work plan.
 - `tiers/_schema.json` — JSON Schema (lands in P1).
