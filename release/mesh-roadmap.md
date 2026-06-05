@@ -34,12 +34,12 @@ network — independent of location, NAT, cloud provider, or CNI.
 | Phase | What | Effort | New services | Detailed doc |
 |-------|------|--------|--------------|--------------|
 | 0 | Foundation: userspace engine, peer registry, reconcile contract | L | — | `mesh-phase-0-1-tasks.md` |
-| 1 | MagicDNS (`name.mesh`) | S | — | `mesh-phase-0-1-tasks.md` |
-| 2 | Mesh ACL (L4 FilterRule) + SSH (step-ca SSH CA) | M | — | `mesh-phase-2-3-tasks.md` |
-| 3 | Posture checks (heartbeat attestation + admission gate) | M | — | `mesh-phase-2-3-tasks.md` |
+| 1 | MagicDNS (`name.mesh`) | S | — | **DONE (2026-06-04)** — `mesh-phase-0-1-tasks.md` |
+| 2 | Mesh ACL (L4 FilterRule) + SSH (step-ca SSH CA) | M | — | **ACL core + SSH skeleton done (2026-06-04)** — `mesh-phase-2-3-tasks.md` |
+| 3 | Posture checks (heartbeat attestation + admission gate) | M | — | **core done (2026-06-04)** — `mesh-phase-2-3-tasks.md` |
 | 4 | NAT traversal / DERP + P2P signaling | XL | `mesh-signal`, `derp` | `mesh-phase-4-feasibility.md`, `mesh-phase-4-spike-tasks.md` |
-| 5 | Subnet routing / exit node | S-M | — | `mesh-phase-5-6-feasibility.md` |
-| 6 | k8s federation (Submariner + mesh) | L | `k8s-controller` | `mesh-phase-5-6-feasibility.md` |
+| 5 | Subnet routing / exit node | S-M | — | **core done (2026-06-04)** — `mesh-phase-5-6-feasibility.md` |
+| 6 | k8s federation (Submariner + mesh) | L | `k8s-controller` | **skeleton done (2026-06-04)** — `mesh-phase-5-6-feasibility.md` |
 
 Plan overview: `mesh-overlay-plan.md`.
 
@@ -95,6 +95,35 @@ source-of-truth, MagicDNS resolver, ACL compiler, posture, k8s-controller.
   DERP map, builds minimal netmap from registry.
 - `apps/derp` — relay (wraps tailscale derp + step-ca TLS), multi-region, HA.
 - `apps/k8s-controller` — Submariner orchestration, federation reconcile.
+
+## Implementation status (2026-06-04)
+
+**Feature-complete in code across all layers** — datapath + control-plane +
+transport + agent daemon + operator UI + services. What remains is deploy-time /
+external-infra only (real clusters, real CA, real node TUN, real gateway).
+
+| Phase | Built | Tests |
+|-------|-------|-------|
+| 0 Foundation | userspace engine (`apps/mesh-engine`, off-go.work), MeshPeer/MeshNetwork registry + IP allocator, reconcile contract, node-side keygen, stateless mesh-controller, planner wiring, Hello mesh fields, endpoint ingest | keygen ×4 |
+| 1 MagicDNS | engine DNS resolver (`name.<domain>`→ip from netmap), agent split-DNS (resolvectl), Filament MeshPeers page | resolver ×2 |
+| 2 ACL + SSH | engine L4 packet filter (tailcfg.FilterRule→tsTun), MeshAclPolicy + groups + compiler, MeshAclPolicyResource CRUD; engine sshd-config + principals render from netmap, principalFromEmail, principal UI | ACL ×2, ssh ×2 (engine) +2 (agent) |
+| 3 Posture | agent CollectPosture, PostureEvaluator (default-lenient/fail-closed), admission gate in MeshPeerSync | (lint) |
+| 4 Prod | spike proven (S0-S5), `apps/derp` (persistent key, step-ca TLS), mesh-signal = MeshNetmapBuilder + endpoint, gateway Poller (sign+dispatch), agent EngineClient + Supervisor + ApplyNetmapJSON | wire ×1, supervisor ×1, netmap ×3, derp smoke, poller ×2 |
+| 5 Subnet/exit | approved_subnets gate (advertised≠enabled), MeshRouteApprover, route approval UI; exit node = approve 0.0.0.0/0 | (logic verified) |
+| 6 k8s | `apps/k8s-controller` (Submariner vxlan-over-mesh orchestration), k8s-cluster kind + service-link edge, `__k8s-federation__` pass, ReconcileSink + TopologyDeployer wiring | reconcile ×5 |
+| — Agent daemon | WSS transport (`transport.Dial`/`WSConn`/`DeriveSession`), session.Receiver (HMAC+replay), `run.Loop` (Hello+heartbeat+command+mesh routing), `playbook.OSRunner` (production exec runner), dispatcher wired; agent `run` went from stub → fully functional | receiver, loop ×1, osrunner ×2 |
+
+**New services:** `apps/mesh-engine`, `apps/derp` (both off-go.work, embed tailscale), `apps/k8s-controller` (in go.work). Plus control-plane `app/Services/Mesh/*` + `app/Filament/Admin/{Pages/Mesh,Resources/MeshAclPolicyResource}`.
+
+**Remaining — deploy-time / external-infra ONLY (no code):**
+1. Real `subctl`/broker + step-ca SSH CA cert-mint runners against real clusters/CA.
+2. Real-node (Linux+root TUN) + real-cluster + real-gateway integration tests.
+3. Playbook signing pubkey + step-ca SSH CA provisioning at enroll/deploy time;
+   `mesh.ssh_ca_pubkey_path` config.
+
+The MVP-2 e2e chain (CP registry → builder → gateway poller → signed mesh_netmap
+frame → agent WSS receive loop → supervisor → mesh-engine octa0) is code-complete
+and unit-tested at every hop; it needs a real gateway + root TUN host to run live.
 
 ## Doc index
 - `mesh-overlay-plan.md` — full phased plan + seams.

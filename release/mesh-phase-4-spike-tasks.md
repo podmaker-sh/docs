@@ -112,8 +112,28 @@ Strategy D (headscale) before committing Phase 4.
   the wrong one fails with a `tun.Device` interface mismatch.
   **Bug found+fixed:** the WaitReady replacement must not *consume* the first
   endpoint from epCh (meshStacks needs it) — peek `len(epCh)>0` instead.
-- **Next:** S3 — add `natlab.SNAT44`+`Firewall` per node → `TestTwoNodeSymmetricNAT`;
-  then S4 GATE (path = DERP under sym/sym, force direct, drop→DERP, restore).
+- **2026-06-04 · S3 + S4 DONE** — `node/nat_test.go` adds two natlab
+  topologies driven by `SNAT44` + `Firewall`:
+  - `TestSymmetricNATFallback` — both nodes behind
+    `AddressAndPortDependentNAT`; direct hole-punching is impossible by
+    construction. PING transits via DERP only (`CurAddr=""`, `Relay`
+    set). **THE GATE — passed.**
+  - `TestEasyNATDirect` — both nodes behind `EndpointIndependentNAT`;
+    hole-punching succeeds → direct path (`CurAddr` populated).
+    Confirms the engine upgrades when the NAT shape permits it.
+  Reproducible from a clean tree with
+  `cd spikes/mesh-p4 && GOWORK=off go test ./node/ -v`.
+- **2026-06-04 · S5 DONE** — `docs/release/mesh-signal-contract.md`
+  locks the netmap shape + tailscale API surface mesh-signal must
+  produce. The doc is derived from the working spike, not from
+  reading tailscale internals; production Phase 4 (`apps/derp`,
+  `apps/mesh-signal`, `apps/agent/internal/mesh/engine.go`) is
+  specced from there.
+- **GATE OUTCOME:** Strategy A is viable. The agent engine can embed
+  tailscale's magicsock + wgengine through external-package exported
+  API without forking internals, and our minimal control plane is
+  sufficient to drive symmetric/symmetric DERP fallback and easy-NAT
+  direct upgrades.
 
 ## What this spike explicitly does NOT do
 - No step-ca TLS on DERP (prod only).

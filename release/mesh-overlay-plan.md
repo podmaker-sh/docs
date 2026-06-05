@@ -1,6 +1,13 @@
 # Podmaker Mesh Overlay + k8s Federation Plan
 
-**Status:** Design / approved direction
+> **Durable design extracted** to [`docs/reference/mesh-overlay-architecture.md`](../reference/mesh-overlay-architecture.md).
+> This document is retained for its roadmap cross-links (`mesh-roadmap.md`,
+> `mesh-phase-*-tasks.md`); consult the reference for the canonical architecture.
+
+**Status:** Feature-complete in code across all layers (6 phases + agent daemon
++ operator UI + 3 new services), unit-tested at every hop. Remaining is
+deploy-time / external-infra only (real clusters, CA, node TUN, gateway). See
+`mesh-roadmap.md` § Implementation status.
 **Date:** 2026-06-04
 
 ## Goal
